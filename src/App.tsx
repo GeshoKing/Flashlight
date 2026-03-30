@@ -75,7 +75,11 @@ const LEVELS: Level[] = [
 
 export default function App() {
   const [currentLevelIdx, setCurrentLevelIdx] = useState(0);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  // Initialize to center of screen immediately
+  const [mousePos, setMousePos] = useState({ 
+    x: typeof window !== 'undefined' ? window.innerWidth / 2 : 500, 
+    y: typeof window !== 'undefined' ? window.innerHeight / 2 : 500 
+  });
   const [foundObjects, setFoundObjects] = useState<string[]>([]);
   const [gameState, setGameState] = useState<'start' | 'playing' | 'level-complete' | 'all-complete'>('start');
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -85,10 +89,59 @@ export default function App() {
   const currentLevel = LEVELS[currentLevelIdx];
 
   // Smooth flashlight movement
-  const flashlightX = useMotionValue(0);
-  const flashlightY = useMotionValue(0);
-  const smoothX = useSpring(flashlightX, { damping: 30, stiffness: 200 });
-  const smoothY = useSpring(flashlightY, { damping: 30, stiffness: 200 });
+  const flashlightX = useMotionValue(typeof window !== 'undefined' ? window.innerWidth / 2 : 500);
+  const flashlightY = useMotionValue(typeof window !== 'undefined' ? window.innerHeight / 2 : 500);
+  const smoothX = useSpring(flashlightX, { damping: 35, stiffness: 250 });
+  const smoothY = useSpring(flashlightY, { damping: 35, stiffness: 250 });
+
+  // Update position logic
+  const updatePosition = useCallback((clientX: number, clientY: number) => {
+    if (!containerRef.current) {
+      // Fallback if ref isn't ready
+      setMousePos({ x: clientX, y: clientY });
+      flashlightX.set(clientX);
+      flashlightY.set(clientY);
+      return;
+    }
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    
+    setMousePos({ x, y });
+    flashlightX.set(x);
+    flashlightY.set(y);
+  }, [flashlightX, flashlightY]);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    updatePosition(e.clientX, e.clientY);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length > 0) {
+      updatePosition(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  };
+
+  const handleInteraction = (e: React.MouseEvent | React.TouchEvent) => {
+    if ('touches' in e) {
+      if (e.touches.length > 0) {
+        updatePosition(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    } else {
+      updatePosition((e as React.MouseEvent).clientX, (e as React.MouseEvent).clientY);
+    }
+  };
+
+  // Reset position when level starts
+  useEffect(() => {
+    if (gameState === 'playing') {
+      const x = window.innerWidth / 2;
+      const y = window.innerHeight / 2;
+      setMousePos({ x, y });
+      flashlightX.set(x);
+      flashlightY.set(y);
+    }
+  }, [gameState, flashlightX, flashlightY]);
 
   // --- TTS Logic ---
 
@@ -115,8 +168,25 @@ export default function App() {
         if (!audioContextRef.current) {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         }
-        const audioData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0)).buffer;
-        const audioBuffer = await audioContextRef.current.decodeAudioData(audioData);
+        
+        // Gemini TTS returns raw PCM (16-bit, mono, 24kHz)
+        const binaryString = atob(base64Audio);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        // Convert 16-bit PCM to Float32
+        const int16Data = new Int16Array(bytes.buffer);
+        const float32Data = new Float32Array(int16Data.length);
+        for (let i = 0; i < int16Data.length; i++) {
+          float32Data[i] = int16Data[i] / 32768.0;
+        }
+
+        const audioBuffer = audioContextRef.current.createBuffer(1, float32Data.length, 24000);
+        audioBuffer.getChannelData(0).set(float32Data);
+
         const source = audioContextRef.current.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContextRef.current.destination);
@@ -132,27 +202,6 @@ export default function App() {
   };
 
   // --- Handlers ---
-
-  const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!containerRef.current || gameState !== 'playing') return;
-    const rect = containerRef.current.getBoundingClientRect();
-    let clientX, clientY;
-
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = (e as React.MouseEvent).clientX;
-      clientY = (e as React.MouseEvent).clientY;
-    }
-
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    
-    setMousePos({ x, y });
-    flashlightX.set(x);
-    flashlightY.set(y);
-  };
 
   const checkDiscovery = (obj: HiddenObject) => {
     if (gameState !== 'playing') return;
@@ -243,7 +292,9 @@ export default function App() {
             className="relative w-full h-full cursor-none touch-none"
             style={{ background: currentLevel.bgGradient }}
             onMouseMove={handleMouseMove}
-            onTouchMove={handleMouseMove}
+            onTouchMove={handleTouchMove}
+            onMouseDown={handleInteraction}
+            onTouchStart={handleInteraction}
           >
             {/* Objects Layer */}
             <div className="absolute inset-0">
