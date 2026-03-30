@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, useMotionValue, useSpring, AnimatePresence } from 'motion/react';
+import { motion, useMotionValue, useSpring, AnimatePresence, useMotionTemplate } from 'motion/react';
 import { 
   Ghost, Cat, Moon, Sun, Star, Bird, Lamp, Search, 
   HelpCircle, RefreshCw, Trophy, Volume2, Map,
@@ -13,6 +13,7 @@ import {
 import { GoogleGenAI, Modality } from "@google/genai";
 
 // --- Types & Data ---
+// ... (rest of the types and data remain same)
 
 interface HiddenObject {
   id: string;
@@ -75,11 +76,6 @@ const LEVELS: Level[] = [
 
 export default function App() {
   const [currentLevelIdx, setCurrentLevelIdx] = useState(0);
-  // Initialize to center of screen immediately
-  const [mousePos, setMousePos] = useState({ 
-    x: typeof window !== 'undefined' ? window.innerWidth / 2 : 500, 
-    y: typeof window !== 'undefined' ? window.innerHeight / 2 : 500 
-  });
   const [foundObjects, setFoundObjects] = useState<string[]>([]);
   const [gameState, setGameState] = useState<'start' | 'playing' | 'level-complete' | 'all-complete'>('start');
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -94,11 +90,12 @@ export default function App() {
   const smoothX = useSpring(flashlightX, { damping: 35, stiffness: 250 });
   const smoothY = useSpring(flashlightY, { damping: 35, stiffness: 250 });
 
+  // Create a synced motion template for the mask
+  const maskBackground = useMotionTemplate`radial-gradient(circle 140px at ${smoothX}px ${smoothY}px, transparent 0%, rgba(0,0,0,0.98) 100%)`;
+
   // Update position logic
   const updatePosition = useCallback((clientX: number, clientY: number) => {
     if (!containerRef.current) {
-      // Fallback if ref isn't ready
-      setMousePos({ x: clientX, y: clientY });
       flashlightX.set(clientX);
       flashlightY.set(clientY);
       return;
@@ -107,7 +104,6 @@ export default function App() {
     const x = clientX - rect.left;
     const y = clientY - rect.top;
     
-    setMousePos({ x, y });
     flashlightX.set(x);
     flashlightY.set(y);
   }, [flashlightX, flashlightY]);
@@ -137,7 +133,6 @@ export default function App() {
     if (gameState === 'playing') {
       const x = window.innerWidth / 2;
       const y = window.innerHeight / 2;
-      setMousePos({ x, y });
       flashlightX.set(x);
       flashlightY.set(y);
     }
@@ -286,6 +281,7 @@ export default function App() {
         {gameState === 'playing' && (
           <motion.div 
             key="playing"
+            ref={containerRef}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -329,9 +325,7 @@ export default function App() {
             {/* Flashlight Mask */}
             <motion.div 
               className="absolute inset-0 pointer-events-none"
-              style={{
-                background: `radial-gradient(circle 140px at ${mousePos.x}px ${mousePos.y}px, transparent 0%, rgba(0,0,0,0.98) 100%)`
-              }}
+              style={{ background: maskBackground }}
             />
 
             {/* Triggers */}
@@ -378,18 +372,20 @@ export default function App() {
               </div>
             </div>
 
-            {/* Visual Flashlight Ring */}
+            {/* Visual Flashlight Ring & Center Indicator */}
             <motion.div
-              className="absolute pointer-events-none border border-white/10 rounded-full shadow-[0_0_100px_rgba(255,255,255,0.05)]"
+              className="absolute pointer-events-none border border-white/20 rounded-full shadow-[0_0_100px_rgba(255,255,255,0.05)] flex items-center justify-center"
               style={{
                 width: 280,
                 height: 280,
-                x: smoothX,
-                y: smoothY,
-                translateX: -140,
-                translateY: -140,
+                left: smoothX,
+                top: smoothY,
+                x: "-50%",
+                y: "-50%",
               }}
             >
+              {/* Center Bulb/Pointer */}
+              <div className="w-2 h-2 bg-white/40 rounded-full blur-[1px] shadow-[0_0_10px_white]" />
               <div className="absolute inset-0 rounded-full border-2 border-white/5 animate-pulse" />
             </motion.div>
 
